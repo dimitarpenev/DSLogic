@@ -1497,6 +1497,31 @@ static void resubmit_transfer(struct libusb_transfer *transfer)
     sr_err("%s: %s", __func__, libusb_error_name(ret));
 }
 
+//The current approach is more a proofe of concept
+void rle_decode(uint16_t *data_rle, unsigned long len_rle, uint16_t *data, unsigned long len){
+	unsigned long first_sample_idx, i,j, k;
+	uint16_t count;
+	//Sckip to the first sample
+	first_sample_idx=0;
+	while(data_rle[first_sample_idx++] & 0x8000);
+	
+	j=0;
+	for(i=first_sample_idx-1; (j<len) && (i<len_rle); i++){
+                if(data_rle[i] & 0x8000){//Count
+			count=data_rle[i]&0x7fff;
+                        for(k=0; k<count ;k++){
+				data[j++]=data_rle[i-1];
+				if(j>=len) break;
+			}  
+		} else{		      //Sample
+			data[j++]=data_rle[i];
+		}
+
+	}
+	printf("RLE DEcode RLE_len=%d, LINEAR_len=%d\n", i, j);	
+}
+
+uint16_t capture[18*1024*1024]; //We have 16M samples but we reserve a bit mote 
 
 static void receive_transfer(struct libusb_transfer *transfer)
 {
@@ -1567,6 +1592,21 @@ static void receive_transfer(struct libusb_transfer *transfer)
         devc->empty_transfer_count = 0;
     }
 
+    {	
+	//We get the whole RLE data on thefirst packet. (We get in total 9 packets, 8 * 2000128 samples + 1 * 776192 = 16M)
+	//We create Linear data on the first packets and then copy it for each new packege so easy integrate in the GUI
+	//Note that this is for proof of consept only !!! 
+    	static packet_idx, samples_idx;
+	unsigned long i;
+    	if (!(packet_idx++ % 9)) { //We get 9 packets in case of 100MHz 16M samples
+		rle_decode((uint16_t*)cur_buf, cur_sample_count, capture, 18*1024*1024);
+		samples_idx=0;
+	}
+	
+	for(i=0;i<cur_sample_count;i++)	*((uint16_t *)cur_buf+i)=capture[samples_idx+i];
+	samples_idx += cur_sample_count; 
+    }
+    
     trigger_offset = 0;
     if (devc->trigger_stage >= 0) {
         for (i = 0; i < cur_sample_count; i++) {
