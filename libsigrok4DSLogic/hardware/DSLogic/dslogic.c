@@ -4,6 +4,8 @@
  * Copyright (C) 2013 Bert Vermeulen <bert@biot.com>
  * Copyright (C) 2013 DreamSourceLab <dreamsourcelab@dreamsourcelab.com>
  *
+ * Dimitar Penev 2015 dpn@switchfin.org added two functions for RLE decoding  
+ *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation, either version 3 of the License, or
@@ -1496,12 +1498,33 @@ static void resubmit_transfer(struct libusb_transfer *transfer)
 
     sr_err("%s: %s", __func__, libusb_error_name(ret));
 }
-#define FPGA_RLE_LEN   0xffff  //This is how long currently our RLE buffer in the FPGA
+
+//Calculate linear record length corresponding to the RLE encrypted data
+unsigned long long rle2len(uint16_t *data_rle, unsigned long len_rle){
+	unsigned long first_sample_idx, i;
+	unsigned long long count;
+        
+	//Sckip to the first sample
+	first_sample_idx=0;
+	while(data_rle[first_sample_idx++] & 0x8000);
+
+	count=0;
+	for(i=first_sample_idx-1; i<len_rle; i++)
+		if(data_rle[i] & 0x8000)//Count
+			count+=(data_rle[i]&0x7fff);
+		else               	//Sample
+			count++;
+	
+	return (count);
+}
+
+
+#define FPGA_RLE_LEN   0xffff  //This is how long currently our RLE buffer is in the FPGA
 			       //The capture waits untill we get that many RLE samples.
-			       //Note that this may be a lot of time to get that many RLE 
-			       //for some measured signals. This may be increase to 16M 
-			       //which means hours of recording  
-//The current approach is more a proofe of concept
+			       //Note that this may be a lot of time to get that many RLE samples 
+			       //for some measured signals. This value may be increased to 16M 
+			       //which means hours long recording  
+//The current approach is more a proof of concept
 void rle_decode(uint16_t *data_rle, unsigned long len_rle, uint16_t *data, unsigned long len){
 	unsigned long first_sample_idx, i,j, k;
 	uint16_t count;
@@ -1603,7 +1626,7 @@ static void receive_transfer(struct libusb_transfer *transfer)
     	static packet_idx, samples_idx;
 	unsigned long i;
     	if (!(packet_idx++ % 9)) { //We get 9 packets in case of 100MHz 16M samples
-		rle_decode((uint16_t*)cur_buf, cur_sample_count, capture, 18*1024*1024);
+		rle_decode((uint16_t*)cur_buf, FPGA_RLE_LEN, capture, 18*1024*1024);
 		samples_idx=0;
 	}
 	
